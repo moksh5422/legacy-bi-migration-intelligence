@@ -8,8 +8,8 @@ from pipeline.evaluation import evaluate_migration, ragas_fixture
 from pipeline.lineage import build_lineage
 from pipeline.planner import plan_reports
 from pipeline.review import build_review_queue
-from pipeline.security import authorize, detect_pii_fields
-from .agents import DiscoveryAgent, MigrationAgent, PIIAgent, PlanningAgent, SecurityPolicy
+from pipeline.security import detect_pii_fields
+from .agents import DiscoveryAgent, MigrationAgent, PlanningAgent, SecurityPolicy
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,7 +37,6 @@ def main() -> None:
     planner = PlanningAgent()
     migration = MigrationAgent()
     security = SecurityPolicy()
-    pii = PIIAgent()
 
     print("=== 1. DISCOVERY ===")
     inventory = discovery.inventory(report)
@@ -53,8 +52,14 @@ def main() -> None:
 
     print("\n=== 4. SECURITY + PII ===")
     auth = security.authorize("migration-engineer", "sample-data")
-    pii_result = pii.scan(report)
-    print(json.dumps({"authorization": auth, "pii": pii_result}, indent=2))
+    fields = ["customer_id", "Region", "SalesAmount"]
+    pii_fields = detect_pii_fields(fields)
+    security_result = {
+        "authorization": auth,
+        "pii_fields": pii_fields,
+        "pii_detected": bool(pii_fields),
+    }
+    print(json.dumps(security_result, indent=2))
 
     print("\n=== 5. ETL / CURATED DATA ===")
     print(json.dumps({k: v for k, v in curated.items() if k != "rows"}, indent=2))
@@ -67,9 +72,8 @@ def main() -> None:
     checks = reconcile(source, curated)
     print(json.dumps(checks, indent=2))
 
-    migration_dict = getattr(spec, "__dict__", spec)
-    evaluation = evaluate_migration(migration_dict, checks)
-    review = build_review_queue(report, migration_dict, {"pii_detected": pii_result.get("pii_detected", False)}, checks)
+    evaluation = evaluate_migration(spec, checks)
+    review = build_review_queue(report, spec, security_result, checks)
 
     print("\n=== 8. EVALUATION ===")
     print(json.dumps({"migration": evaluation, "ragas_fixture": ragas_fixture()}, indent=2))
