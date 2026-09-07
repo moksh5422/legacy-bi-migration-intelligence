@@ -1,272 +1,245 @@
 # Legacy BI Migration Intelligence
 
-A focused engineering project for a difficult enterprise migration problem: using AI to understand legacy BI logic without making the model responsible for security, correctness, or production performance.
+A focused reference implementation for a difficult enterprise migration problem: **how can AI reduce the investigation and mapping work in a legacy BI migration without making the model responsible for security, correctness, or release decisions?**
 
-This is a **sanitized portfolio implementation** based on a migration pattern involving **81 Spotfire reports**, multiple source systems, legacy transformations, calculated fields, filters, and business rules, with the target platform being **Power BI and Microsoft Fabric**.
+The reference is based on a migration pattern involving **81 Spotfire reports**, multiple source systems, legacy transformations, calculated fields, filters, and business rules, with **Power BI and Microsoft Fabric** as the target platform.
 
-No client data, proprietary report definitions, credentials, or confidential implementation details are included.
+The public repository is intentionally sanitized. It uses synthetic data and local interfaces; it does not contain client data, proprietary report definitions, credentials, or confidential implementation details.
 
-## The problem
+## What is actually implemented here
 
-A large BI migration is easy to describe as:
+The repository contains a runnable Python workflow that demonstrates the core pattern end to end:
 
 ```text
-Open report -> understand it -> rebuild it -> validate it -> repeat
+Synthetic legacy report
+        |
+        v
+Discovery / inventory
+        |
+        v
+Migration planning
+        |
+        v
+AI-assisted migration analysis
+        |
+        +------------------+
+        |                  |
+        v                  v
+ PII / security       Migration spec
+        |                  |
+        +--------+---------+
+                 |
+                 v
+        Synthetic ETL
+ Extract -> Transform -> Curate
+                 |
+                 v
+              Lineage
+                 |
+                 v
+        Deterministic checks
+                 |
+        +--------+--------+
+        |                 |
+       PASS             REVIEW
+        |                 |
+        +--------+--------+
+                 v
+       Evaluation + review queue
 ```
 
-The difficult part is everything hidden inside that loop: undocumented dependencies, calculations, transformation logic, inconsistent business rules, sensitive data, and the need to prove that the new result still matches the old one.
-
-The approach here turns those repeated decisions into a workflow that can be applied across many reports.
+The LLM is optional. Without Azure credentials, the same flow runs using deterministic fallback logic so the project can be cloned and exercised locally.
 
 ## Three versions of the solution
 
 ### V1 — Understand the legacy workload
 
-The first version focused on discovery and interpretation.
+A report is turned into structured metadata containing sources, calculations, filters, transformations, and dependencies.
 
-A report is converted into structured metadata containing sources, calculations, filters, transformations, and dependencies. An LLM can then help with interpretation tasks such as explaining unfamiliar expressions, suggesting a target implementation, grouping similar logic, and flagging ambiguous mappings.
-
-The model produces a proposal. It does not declare the migration correct.
+The migration agent can use Azure OpenAI to interpret unfamiliar expressions and propose where logic should live:
 
 ```text
-Legacy report
-    |
-    v
-Inventory + parsing
-    |
-    v
-Dependency / transformation analysis
-    |
-    v
-LLM-assisted mapping
-    |
-    v
-Migration specification
+legacy expression
+      -> interpretation
+      -> proposed target layer
+      -> confidence
+      -> review when ambiguous
 ```
+
+The model proposes; it does not approve the migration.
 
 ### V2 — Secure the workflow
 
-Once the workflow can reason over enterprise information, access becomes a separate engineering concern.
+The application is the security boundary.
 
-The application remains the security boundary. Identity and role-based access control are checked before an AI or tool operation is allowed. PII handling and guardrails are also applied around the AI path.
+RBAC is checked before data or tools are accessed. PII-like fields can be detected before an AI path is used. The public demo uses synthetic inputs to illustrate the control points.
 
 ```text
-Identity
-   |
-   v
-RBAC / authorization
-   |
-   v
-Allowed scope
-   |
-   v
-AI or tool operation
+identity
+  -> authorization
+  -> PII policy
+  -> allowed operation
+  -> AI / tool
 ```
-
-The model can request an action; it cannot grant itself permission to perform it.
 
 ### V3 — Evaluate and improve performance
 
-The final version focuses on trust and usability.
+Migration acceptance uses deterministic reconciliation rather than an LLM judgment.
 
-For AI components, **RAGAS** can be used to measure retrieval and answer quality when prompts, chunking, search settings, or models change. For the migration itself, deterministic reconciliation checks compare row counts, aggregates, measures, filters, and other business values.
+The repository also includes an evaluation contract for RAGAS metrics and a lightweight telemetry utility for timing pipeline steps. The RAGAS file is a synthetic fixture; a real deployment would connect it to a secured RAG evaluation dataset.
 
-Latency is treated as a full request-path problem rather than only a model problem:
-
-```text
-request
-  -> retrieval
-  -> context construction
-  -> model call
-  -> response delivery
-```
-
-Caching and **SSE streaming** are used where appropriate. The workload described by the project saw an improvement of approximately **250 ms at P95**.
-
-## Agent design
-
-The system deliberately uses agents only where interpretation or planning benefits from an LLM. Other responsibilities remain deterministic.
-
-### Discovery / Inventory Agent
-
-Builds a searchable view of report sources, tables, calculations, filters, relationships, and transformations.
-
-### Migration Planning Agent
-
-Looks across the report inventory and produces migration order, dependency information, complexity/risk signals, and a first-pass plan so engineers can focus on the harder cases first.
-
-### Migration Analysis Agent
-
-Interprets legacy expressions and recommends whether logic belongs in the Fabric transformation layer, the semantic model, or requires human review.
-
-### Security / Policy Layer
-
-Checks identity, scope, RBAC, PII rules, and allowed operations before AI or tool access. This is intentionally not delegated to the LLM.
-
-### Similarity / Reuse Agent
-
-Finds reports or calculations that use substantially similar business logic so common transformations and semantic definitions can be reused instead of migrated independently.
-
-### Evaluation Agent
-
-Checks confidence, review flags, and evaluation results and decides whether a migration can move forward or needs human review.
-
-### Tool / MCP Layer
-
-Provides controlled functions such as:
+The performance view is the full request path:
 
 ```text
-list_report_dependencies()
-get_transformation()
-get_sample_data()
-validate_report()
-create_migration_spec()
-submit_for_review()
+request -> retrieval -> context -> model -> response
 ```
 
-RBAC remains in front of those tools.
+Caching and SSE are documented as the next production layer; the migration workload represented by this project saw approximately **250 ms P95 improvement** during performance work.
 
-### Deterministic Reconciliation Engine
+## Agents and controls
 
-Compares source and target outputs. It is intentionally code-driven rather than model-driven.
+| Component | Role in the workflow | Implemented in demo |
+|---|---|---|
+| Discovery Agent | Builds report/source/calculation inventory | Yes |
+| Planning Agent | Scores complexity and orders work | Yes |
+| Migration Agent | Interprets legacy expressions and proposes mappings | Yes; Azure OpenAI optional |
+| Security / RBAC | Enforces scope before operations | Yes |
+| PII Control | Flags sensitive-looking fields | Yes |
+| Similarity / reuse | Identifies repeated expressions | Present in agent module |
+| Evaluation Agent | Applies confidence/review gates | Yes |
+| MCP tool boundary | Represents an allow-listed tool surface | Yes, local registry |
+| ETL | Extract, normalize, transform, curate | Yes |
+| Lineage | Maps source logic to target layer | Yes |
+| Reconciliation | Compares old/new values deterministically | Yes |
+| Review Queue | Collects mapping, security, and validation exceptions | Yes |
+| RAGAS | Evaluation contract / fixture | Fixture included |
+| Observability | Step-level timing | Yes |
+| CI/CD | Tests + runnable demo on push/PR | Yes |
 
-## End-to-end flow
+## End-to-end example
 
-```text
-                         +----------------------+
-                         | Migration Planner     |
-                         +----------+-----------+
-                                    |
-                         +----------v-----------+
-                         | Discovery Agent      |
-                         +----------+-----------+
-                                    |
-                         +----------v-----------+
-                         | Migration Agent      |
-                         +----------+-----------+
-                                    |
-                  +-----------------+-----------------+
-                  |                                   |
-          +-------v--------+                    +-----v------+
-          | Security Layer |                    | MCP / Tools |
-          | RBAC / PII     |                    | controlled  |
-          +-------+--------+                    +-----+------+
-                  |                                   |
-                  +-----------------+-----------------+
-                                    |
-                         +----------v-----------+
-                         | Human Review Queue   |
-                         +----------+-----------+
-                                    |
-                         +----------v-----------+
-                         | Fabric Transformation|
-                         +----------+-----------+
-                                    |
-                         +----------v-----------+
-                         | Semantic Model       |
-                         +----------+-----------+
-                                    |
-                         +----------v-----------+
-                         | Power BI Report       |
-                         +----------+-----------+
-                                    |
-                    +---------------+---------------+
-                    |               |               |
-             +------v-----+   +-----v-----+   +-----v-----+
-             | Reconcile  |   | RAGAS      |   | Latency   |
-             | source vs  |   | evaluation |   | / caching |
-             | target     |   |            |   | / SSE     |
-             +------+-----+   +-----+------+   +-----+-----+
-                    |               |               |
-                    +---------------+---------------+
-                                    |
-                         +----------v-----------+
-                         | Release / Review     |
-                         +-----------------------+
-```
+The synthetic report describes revenue, customer segmentation, a region filter, two upstream sources, and a normalization rule.
 
-## Working demo
+The ETL layer reads synthetic CSV data, normalizes values, applies the business rule, and creates a curated output. The migration workflow then checks authorization, builds lineage, compares source and target metrics, and creates a review queue when something does not reconcile.
 
-The `demo/` folder contains a small VS Code-runnable implementation using synthetic input data.
-
-### Run without Azure credentials
-
-The project includes a deterministic fallback so the workflow can be demonstrated locally without an Azure subscription.
+Run the full workflow from the repository root:
 
 ```bash
-cd demo
 python -m venv .venv
 
 # Windows
-.venv\Scripts\activate
+.venv\\Scripts\\activate
 
 pip install -r requirements.txt
 python -m demo.app
+python pipeline/run.py
+pytest -q
 ```
 
-### Run with Azure OpenAI
+### Azure OpenAI mode
 
-Copy `.env.example` to `.env` and provide the approved Azure OpenAI endpoint, deployment name, API key, and API version.
+Copy `demo/.env.example` to `demo/.env` and provide the approved Azure OpenAI endpoint, deployment, key, and API version.
 
-The migration agent then uses Azure OpenAI for interpretation while authorization, validation, and acceptance decisions remain in application code.
+The model is used for interpretation only. Authorization, validation, reconciliation, and release decisions remain in code.
 
-## What the demo shows
+## Migration manifest and lineage
 
-A synthetic report contains:
-
-- two upstream data sources
-- a region filter
-- a revenue calculation
-- a customer-segmentation calculation
-- a transformation rule
-
-The demo then runs the workflow:
+The intended production pattern is to normalize each report into a migration contract containing:
 
 ```text
-1. Migration analysis
-2. Security authorization
-3. Evaluation
-4. Deterministic reconciliation
-5. Final decision
+report
+sources
+transformations
+calculations
+filters
+dependencies
+status
+confidence
+review items
 ```
 
-One intentionally mismatched value produces a `REVIEW` result so the demo shows why a migration should not be accepted simply because an LLM produced a confident answer.
+Lineage then connects the source logic to its target layer:
+
+```text
+source field
+   -> transformation
+   -> curated data
+   -> semantic-model measure
+   -> Power BI report
+```
+
+This is useful when the same business rule appears in multiple reports because the rule can be identified before it is rebuilt repeatedly.
+
+## Human review and idempotency
+
+A production migration would persist report hashes, migration status, validation results, and review decisions.
+
+That enables:
+
+```text
+unchanged report -> skip
+changed report   -> re-analyze
+failed report    -> resume from checkpoint
+ambiguous case   -> human queue
+```
+
+The public demo shows the review queue pattern; durable state would normally live in a database or workflow/orchestration service.
+
+## Where AI belongs
+
+Use AI where the task requires interpretation:
+
+- legacy-expression understanding
+- target-layer recommendations
+- business-rule explanation
+- similarity hints
+
+Use deterministic code where the system needs guarantees:
+
+- access control
+- PII policy
+- ETL transformations
+- reconciliation
+- acceptance criteria
+- audit records
+
+> **Use the model for interpretation. Use code for guarantees.**
 
 ## Repository structure
 
 ```text
 legacy-bi-migration-intelligence/
 ├── README.md
-├── docs/
-│   ├── architecture.md
-│   ├── agent-design.md
-│   ├── version-1-understand.md
-│   ├── version-2-secure.md
-│   └── version-3-evaluate-perform.md
-├── examples/
-│   └── legacy_report.json
+├── requirements.txt
+├── .github/
+│   └── workflows/
+│       └── ci.yml
 ├── demo/
-│   ├── __init__.py
-│   ├── app.py
 │   ├── agents.py
+│   ├── app.py
 │   ├── models.py
-│   ├── sample_report.json
 │   ├── requirements.txt
-│   └── .env.example
-└── src/
-    └── validate/
-        └── reconciliation.py
+│   ├── .env.example
+│   └── sample_report.json
+├── examples/
+│   ├── legacy_report.json
+│   └── sales.csv
+├── pipeline/
+│   ├── etl.py
+│   ├── evaluation.py
+│   ├── lineage.py
+│   ├── observability.py
+│   ├── planner.py
+│   ├── review.py
+│   ├── run.py
+│   └── security.py
+├── src/
+│   └── validate/
+│       └── reconciliation.py
+└── tests/
+    └── test_pipeline.py
 ```
 
-## Design principles
+## Scope of the public repository
 
-1. **Use the LLM for interpretation, not authority.**
-2. **Keep authorization outside the model.**
-3. **Keep important validation deterministic.**
-4. **Make uncertainty visible instead of hiding it.**
-5. **Automate the predictable cases and route exceptions to engineers.**
-6. **Measure quality, cost, and latency as the system changes.**
-
-## Portfolio note
-
-This repository is a public, sanitized engineering demonstration. It intentionally uses synthetic examples rather than client artifacts.
+This is a **sanitized reference implementation**, not the original enterprise codebase. The purpose is to show the structure of a solution that can sit around a real migration program while keeping proprietary artifacts private.
