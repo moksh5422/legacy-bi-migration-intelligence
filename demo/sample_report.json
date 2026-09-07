@@ -1,0 +1,15 @@
+{
+  "report_id": "sales-overview",
+  "source_system": "spotfire",
+  "data_sources": ["sales_db", "customer_db"],
+  "filters": [
+    {"column": "Region", "operator": "=", "value": "EMEA"}
+  ],
+  "calculations": [
+    {"name": "Revenue", "expression": "SUM(SalesAmount)"},
+    {"name": "Customer Segment", "expression": "IF(CustomerType = 'Enterprise', 'Large', 'Standard')"}
+  ],
+  "transformations": [
+    {"name": "NormalizeRegion", "logic": "TRIM(UPPER(Region))"}
+  ]
+}
